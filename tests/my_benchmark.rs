@@ -5,7 +5,6 @@ use std::sync::Arc;
 use aptos_in_memory_cache::{caches::sync_mutex::SyncMutexCache, Cache};
 use common::{NotATransaction, TestCache};
 use criterion::{criterion_group, criterion_main, Criterion};
-use futures::future::try_join_all;
 use tokio::runtime::Runtime;
 
 async fn bench() {
