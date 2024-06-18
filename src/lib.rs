@@ -7,7 +7,7 @@ use std::hash::Hash;
 pub mod caches;
 
 /// A struct that holds a value and its size in bytes.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SizedCacheEntry<V> {
     pub key: usize,
     pub value: V,

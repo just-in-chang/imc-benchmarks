@@ -13,7 +13,7 @@ async fn bench() {
 
     let c1 = cache.clone();
     let t1 = tokio::spawn(async move {
-        for i in 0..1_000 {
+        for i in 0..1_000_000 {
             c1.insert(i, NotATransaction::new(i as i64));
         }
     });
@@ -21,7 +21,7 @@ async fn bench() {
     let c2 = cache.clone();
     let t2 = tokio::spawn(async move {
         // loop {
-        for i in 0..1_000 {
+        for i in 0..1_000_000 {
             c2.get(&i);
         }
         // }

@@ -112,7 +112,7 @@ impl<C: SizedCache<NotATransaction> + 'static> Cache<usize, NotATransaction> for
     fn insert(&self, key: usize, value: NotATransaction) {
         let size_in_bytes = size_of_unique(&value);
         self.cache.insert_with_size(key, value, size_in_bytes);
-        self.insert_watch.send_replace(key);
+        self.insert_watch.send(key).expect("Failed to send insert watch");
     }
 
     fn total_size(&self) -> u64 {

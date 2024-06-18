@@ -9,6 +9,7 @@ type CacheEntry<T> = Arc<Mutex<Option<SizedCacheEntry<T>>>>;
 
 const MAX_NUM_CACHE_ITEMS: usize = 1_000_000;
 
+#[derive(Debug)]
 pub struct SyncMutexCache<T: Send + Sync + Clone> {
     cache: Box<[CacheEntry<T>]>,
     capacity: usize,
@@ -47,9 +48,14 @@ where
     T: Send + Sync + Clone,
 {
     fn get(&self, key: &usize) -> Option<SizedCacheEntry<T>> {
-        let arc = self.cache[*key % self.capacity].clone();
-        let lock = arc.lock();
-        (*lock).clone()
+        let lock = self.cache[*key % self.capacity].lock();
+        if let Some(entry) = &*lock {
+            if &entry.key != key {
+                return None;
+            }
+            return Some(entry.clone());
+        }
+        None
     }
 
     fn insert_with_size(&self, key: usize, value: T, size_in_bytes: usize) -> usize {

@@ -3,6 +3,7 @@ use aptos_in_memory_cache::caches::sync_mutex::SyncMutexCache;
 use aptos_in_memory_cache::{Cache, SizedCache};
 use std::sync::Arc;
 use std::time::Duration;
+use futures::FutureExt;
 use tokio::{
     sync::watch::{Receiver, Sender},
     task::JoinHandle,
@@ -29,6 +30,7 @@ pub struct TestCacheMetadata {
     pub capacity: usize,
 }
 
+#[derive(Debug)]
 pub struct TestCache<C: SizedCache<NotATransaction> + 'static> {
     pub metadata: Arc<TestCacheMetadata>,
     pub cache: Arc<C>,
@@ -37,11 +39,7 @@ pub struct TestCache<C: SizedCache<NotATransaction> + 'static> {
     pub eviction_task: JoinHandle<()>,
 }
 
-impl<C: SizedCache<NotATransaction> + 'static> Drop for TestCache<C> {
-    fn drop(&mut self) {
-        self.eviction_task.abort();
-    }
-}
+
 
 impl<C: SizedCache<NotATransaction> + 'static> TestCache<C> {
     pub fn with_capacity(
@@ -90,11 +88,10 @@ impl<C: SizedCache<NotATransaction> + 'static> TestCache<C> {
                 println!("evict2");
                 // Evict entries until the cache size is below the target size
                 while cache.total_size() > metadata.target_size_in_bytes {
-                    println!("evicting");
                     if let Some(value) = cache.evict(&eviction_index) {
                         if value.key > watermark_value {
                             cache.insert_with_size(value.key, value.value, value.size_in_bytes);
-                            println!("evictied");
+                            println!("undoing eviction");
                             break;
                         }
                     }
@@ -118,7 +115,7 @@ impl<C: SizedCache<NotATransaction> + 'static> Cache<usize, NotATransaction> for
     fn insert(&self, key: usize, value: NotATransaction) {
         let size_in_bytes = size_of_unique(&value);
         self.cache.insert_with_size(key, value, size_in_bytes);
-        self.insert_watch.send(key).unwrap();
+        self.insert_watch.send(key).expect("Failed to send insert watch");
     }
 
     fn total_size(&self) -> u64 {
@@ -133,26 +130,33 @@ async fn main() {
     let cache = Arc::new(TestCache::with_capacity(ca, 1_100, 1_000));
 
     let c1 = cache.clone();
-    let t1 = tokio::spawn(async move {
-        for i in 0..1 {
+    let mut t1 = tokio::spawn(async move {
+        for i in 0..1_000_000 {
             c1.insert(i, NotATransaction::new(i as i64));
         }
-        println!("lol");
-    });
+        println!("end writing");
+    }).fuse();
 
     let c2 = cache.clone();
-    let t2 = tokio::spawn(async move {
+    let mut t2 = tokio::spawn(async move {
         // loop {
-        for i in 0..1 {
+        for i in 0..1_000_000 {
             c2.get(&i);
         }
-        println!("hi");
+        println!("end reading");
         // }
-    });
+    }).fuse();
 
-    tokio::select! {
-        t1r = t1 => t1r.unwrap(),
-        t2r = t2 => t2r.unwrap(),
-    };
-    println!("hi2");
+    loop {
+        futures::select! {
+            t1r = t1 => t1r.unwrap(),
+            t2r = t2 => t2r.unwrap(),
+            complete => break,
+        }
+    }
+
+    println!("finish all: {:?}", cache.cache.total_size());
+
+    // Sleep for 1s
+    tokio::time::sleep(Duration::from_secs(1)).await;
 }
