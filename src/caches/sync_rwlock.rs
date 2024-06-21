@@ -1,28 +1,28 @@
 use crate::{SizedCache, SizedCacheEntry};
-use parking_lot::Mutex;
+use parking_lot::RwLock;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
 };
 
-type CacheEntry<T> = Arc<Mutex<Option<SizedCacheEntry<T>>>>;
+type CacheEntry<T> = Arc<RwLock<Option<SizedCacheEntry<T>>>>;
 
 const MAX_NUM_CACHE_ITEMS: usize = 1_000_000;
 
-pub struct SyncMutexCache<T: Send + Sync + Clone> {
+pub struct SyncRwLockCache<T: Send + Sync + Clone> {
     cache: Box<[CacheEntry<T>]>,
     capacity: usize,
     size: AtomicUsize,
 }
 
-impl<T> SyncMutexCache<T>
+impl<T> SyncRwLockCache<T>
 where
     T: Send + Sync + Clone,
 {
     pub fn with_capacity(capacity: usize) -> Self {
         let mut buffer = Vec::with_capacity(capacity);
         for _ in 0..capacity {
-            buffer.push(Arc::new(Mutex::new(None)));
+            buffer.push(Arc::new(RwLock::new(None)));
         }
 
         Self {
@@ -33,7 +33,7 @@ where
     }
 }
 
-impl<T> Default for SyncMutexCache<T>
+impl<T> Default for SyncRwLockCache<T>
 where
     T: Send + Sync + Clone,
 {
@@ -42,13 +42,13 @@ where
     }
 }
 
-impl<T> SizedCache<T> for SyncMutexCache<T>
+impl<T> SizedCache<T> for SyncRwLockCache<T>
 where
     T: Send + Sync + Clone,
 {
     fn get(&self, key: &usize) -> Option<SizedCacheEntry<T>> {
         let arc = self.cache[*key % self.capacity].clone();
-        let lock = arc.lock();
+        let lock = arc.read();
         lock.clone()
     }
 
@@ -56,7 +56,7 @@ where
         // Get lock for cache entry
         let index = key % self.capacity;
         let arc = self.cache[index].clone();
-        let mut lock = arc.lock();
+        let mut lock = arc.write();
 
         // Update cache size
         if let Some(prev_value) = &*lock {
@@ -78,7 +78,7 @@ where
     fn evict(&self, key: &usize) -> Option<SizedCacheEntry<T>> {
         // Get lock for cache entry
         let arc = self.cache[*key % self.capacity].clone();
-        let mut lock = arc.lock();
+        let mut lock = arc.write();
 
         // Update cache size & set previous value to none
         if let Some(prev_value) = lock.take() {

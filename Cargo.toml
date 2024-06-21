@@ -5,11 +5,15 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+arc-swap = "1.6.0"
+swap-arc = "0.1.1"
+aarc = "0.2.1"
+async-trait = "0.1.53"
 dashmap = { version = "5.5.3", features = ["inline"] }
 futures = "0.3.29"
 parking_lot = "0.12.0"
 tokio = { version = "1.35.1", features = ["full"] }
-allocative = "0.3.3"
+get-size = { version = "0.1.4", features = ["derive"] }
 tokio-util = { version = "0.7.2", features = ["compat", "codec"] }
 
 [dev-dependencies]

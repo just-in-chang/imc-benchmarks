@@ -1,34 +1,10 @@
-use aptos_in_memory_cache::caches::arcswap::ArcSwapCache;
-use aptos_in_memory_cache::caches::fifo::FIFOCache;
-use aptos_in_memory_cache::caches::sync_mutex::SyncMutexCache;
-// use aptos_in_memory_cache::caches::sync_mutex::SyncMutexCache;
-// use aptos_in_memory_cache::caches::sync_rwlock::SyncRwLockCache;
+use crate::common::{NotATransaction, TestCacheMetadata};
 use aptos_in_memory_cache::{Cache, SizedCache};
 use get_size::GetSize;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::sync::Notify;
-use tokio::task::{JoinHandle, JoinSet};
-
-#[derive(Clone, GetSize, Debug, PartialEq)]
-pub struct NotATransaction {
-    transaction_version: i64,
-}
-
-impl NotATransaction {
-    pub fn new(transaction_version: i64) -> Self {
-        Self {
-            transaction_version,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct TestCacheMetadata {
-    pub eviction_trigger_size_in_bytes: usize,
-    pub target_size_in_bytes: usize,
-    pub capacity: usize,
-}
+use tokio::task::JoinHandle;
 
 #[derive(Debug)]
 pub struct TestCache<C: SizedCache<NotATransaction> + 'static> {
@@ -89,8 +65,7 @@ impl<C: SizedCache<NotATransaction> + 'static> Cache<usize, NotATransaction> for
     }
 
     fn insert(&self, key: usize, value: NotATransaction) {
-        // let size_in_bytes = size_of_unique(&value);
-        let size_in_bytes = GetSize::get_size(&value);
+        let size_in_bytes = value.get_size();
         self.cache
             .insert_with_size(key, Arc::new(value), size_in_bytes);
         if self.cache.total_size() > self.metadata.eviction_trigger_size_in_bytes {
@@ -100,7 +75,7 @@ impl<C: SizedCache<NotATransaction> + 'static> Cache<usize, NotATransaction> for
     }
 
     fn total_size(&self) -> usize {
-        self.cache.total_size()
+        self.cache.total_size() as usize
     }
 }
 
@@ -121,7 +96,7 @@ fn spawn_eviction_task<C: SizedCache<NotATransaction> + 'static>(
             while cache.total_size() > metadata.target_size_in_bytes {
                 if let Some(value) = cache.evict(&eviction_index) {
                     if value.key > watermark_value {
-                        cache.insert_with_size(value.key, value.value, value.size_in_bytes);
+                        cache.insert_with_size(value.key, value.value.clone(), value.size_in_bytes);
                         break;
                     }
                 }
@@ -129,34 +104,4 @@ fn spawn_eviction_task<C: SizedCache<NotATransaction> + 'static>(
             }
         }
     })
-}
-
-#[tokio::main]
-async fn main() {
-    let ca = SyncMutexCache::with_capacity(1_000_000);
-    let cache = Arc::new(TestCache::with_capacity(ca, 1_100_000, 1_000_000));
-    // let cache = Arc::new(FIFOCache::new(1_000_000, 1_100_000, |key, _| Some(key + 1)));
-
-    let mut join_set = JoinSet::new();
-    let num = 5_000_000;
-
-    for _ in 0..1 {
-        let c = cache.clone();
-        join_set.spawn(async move {
-            for i in 0..num {
-                c.insert(i, NotATransaction::new(i as i64));
-            }
-        });
-    }
-
-    for _ in 0..100 {
-        let c = cache.clone();
-        join_set.spawn(async move {
-            for i in 0..num {
-                c.get(&i);
-            }
-        });
-    }
-
-    join_set.join_next().await;
 }

@@ -8,13 +8,12 @@ use parking_lot::RwLock;
 use std::{fmt::Debug, hash::Hash, sync::Arc};
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
-use tracing::info;
 
 #[derive(Debug, Clone, Copy)]
 struct CacheMetadata<K> {
-    eviction_trigger_size_in_bytes: u64,
-    target_size_in_bytes: u64,
-    total_size_in_bytes: u64,
+    eviction_trigger_size_in_bytes: usize,
+    target_size_in_bytes: usize,
+    total_size_in_bytes: usize,
     last_key: Option<K>,
     first_key: Option<K>,
 }
@@ -26,17 +25,17 @@ where
     V: Send + Sync + Clone + 'static,
 {
     /// Precache to support out of order inserts
-    precache: Arc<DashMap<K, V>>,
+    precache: Arc<DashMap<K, Arc<V>>>,
     precache_insert_notify: Arc<Notify>,
     /// Cache maps the cache key to the deserialized Transaction.
-    items: Arc<DashMap<K, V>>,
+    items: Arc<DashMap<K, Arc<V>>>,
     insert_notify: Arc<Notify>,
     cache_metadata: Arc<RwLock<CacheMetadata<K>>>,
     _cancellation_token_drop_guard: tokio_util::sync::DropGuard,
     // User defined function to get the next key for a given key
     // The function provides the key and the getter function to the DashMap in case a lookup is necessary
     next_key_function:
-        Arc<dyn Fn(&K, &dyn Fn(&K) -> Option<V>) -> Option<K> + Send + Sync + 'static>,
+        Arc<dyn Fn(&K, &dyn Fn(&K) -> Option<Arc<V>>) -> Option<K> + Send + Sync + 'static>,
 }
 
 impl<K, V> FIFOCache<K, V>
@@ -45,9 +44,12 @@ where
     V: Send + Sync + Clone + 'static,
 {
     pub fn new(
-        target_size_in_bytes: u64,
-        eviction_trigger_size_in_bytes: u64,
-        next_key_function: impl Fn(&K, &dyn Fn(&K) -> Option<V>) -> Option<K> + Send + Sync + 'static,
+        target_size_in_bytes: usize,
+        eviction_trigger_size_in_bytes: usize,
+        next_key_function: impl Fn(&K, &dyn Fn(&K) -> Option<Arc<V>>) -> Option<K>
+            + Send
+            + Sync
+            + 'static,
     ) -> Self {
         let cancellation_token: CancellationToken = CancellationToken::new();
         let precache = Arc::new(DashMap::new());
@@ -79,11 +81,11 @@ where
     }
 
     fn insert(
-        items: Arc<DashMap<K, V>>,
+        items: Arc<DashMap<K, Arc<V>>>,
         cache_metadata: Arc<RwLock<CacheMetadata<K>>>,
         insert_notify: Arc<Notify>,
         key: K,
-        value: V,
+        value: Arc<V>,
     ) {
         // If cache is empty, set the first to the new key.
         if items.is_empty() {
@@ -93,7 +95,7 @@ where
 
         let mut cache_metadata = cache_metadata.write();
         cache_metadata.last_key = Some(key.clone());
-        cache_metadata.total_size_in_bytes += std::mem::size_of_val(&value) as u64;
+        cache_metadata.total_size_in_bytes += std::mem::size_of_val(&value);
         items.insert(key, value);
         insert_notify.notify_waiters();
     }
@@ -107,7 +109,8 @@ where
         let next_key_function = self.next_key_function.clone();
 
         tokio::spawn(async move {
-            let cache_getter = |k: &K| -> Option<V> { items.get(k).map(|r| r.value().clone()) };
+            let cache_getter =
+                |k: &K| -> Option<Arc<V>> { items.get(k).map(|r| r.value().clone()) };
             loop {
                 tokio::select! {
                     _ = precache_insert_notify.notified() => {
@@ -127,7 +130,6 @@ where
                         }
                     },
                     _ = cancellation_token.cancelled() => {
-                        info!("In-memory cache insertion task is cancelled.");
                         return;
                     }
                 }
@@ -136,10 +138,10 @@ where
     }
 
     fn evict(
-        items: Arc<DashMap<K, V>>,
+        items: Arc<DashMap<K, Arc<V>>>,
         cache_metadata: Arc<RwLock<CacheMetadata<K>>>,
         next_key_function: Arc<
-            dyn Fn(&K, &dyn Fn(&K) -> Option<V>) -> Option<K> + Send + Sync + 'static,
+            dyn Fn(&K, &dyn Fn(&K) -> Option<Arc<V>>) -> Option<K> + Send + Sync + 'static,
         >,
     ) {
         // Skip if eviction is not needed.
@@ -160,7 +162,7 @@ where
         let mut bytes_to_remove = current_cache_metadata
             .total_size_in_bytes
             .saturating_sub(current_cache_metadata.target_size_in_bytes);
-        let getter = |k: &K| -> Option<V> { items.get(k).map(|r| r.value().clone()) };
+        let getter = |k: &K| -> Option<Arc<V>> { items.get(k).map(|r| r.value().clone()) };
         while bytes_to_remove > 0 {
             if let Some(key_to_remove) = current_cache_metadata.first_key.clone() {
                 let next_key = (next_key_function)(&key_to_remove, &getter)
@@ -168,7 +170,7 @@ where
                 let (_k, v) = items
                     .remove(&key_to_remove)
                     .expect("Key to remove should exist.");
-                let size_of_v = std::mem::size_of_val(&v) as u64;
+                let size_of_v = std::mem::size_of_val(&v);
                 bytes_to_remove = bytes_to_remove.saturating_sub(size_of_v);
                 actual_bytes_removed += size_of_v;
                 current_cache_metadata.first_key = Some(next_key);
@@ -194,7 +196,6 @@ where
                         Self::evict(items.clone(), cache_metadata.clone(), next_key_function.clone());
                     },
                     _ = cancellation_token.cancelled() => {
-                        info!("In-memory cache eviction task is cancelled.");
                         return;
                     }
                 }
@@ -212,16 +213,16 @@ where
     K: Debug + Hash + Eq + PartialEq + Send + Sync + Clone,
     V: Send + Sync + Clone,
 {
-    fn get(&self, key: &K) -> Option<V> {
+    fn get(&self, key: &K) -> Option<Arc<V>> {
         self.items.get(key).map(|v| v.value().clone())
     }
 
     fn insert(&self, key: K, value: V) {
-        self.precache.insert(key, value);
+        self.precache.insert(key, Arc::new(value));
         self.precache_insert_notify.notify_waiters();
     }
 
-    fn total_size(&self) -> u64 {
+    fn total_size(&self) -> usize {
         let cache_metadata = self.cache_metadata.read();
         cache_metadata.total_size_in_bytes
     }
@@ -252,14 +253,14 @@ where
         FIFOCache::next_key(self, key)
     }
 
-    fn next_key_and_value(&self, key: &K) -> Option<(K, V)> {
+    fn next_key_and_value(&self, key: &K) -> Option<(K, Arc<V>)> {
         let next_key = self.next_key(key);
         next_key.and_then(|k| self.get(&k).map(|v| (k, v)))
     }
 
     /// Returns a stream of values in the cache starting from the given key.
     /// If the stream falls behind, the stream will return None for the next value (indicating that it should be reset).
-    fn get_stream(&self, starting_key: Option<K>) -> impl Stream<Item = V> + '_ {
+    fn get_stream(&self, starting_key: Option<K>) -> impl Stream<Item = Arc<V>> + '_ {
         // Start from the starting key if provided, otherwise start from the last key
         let initial_state = starting_key.or_else(|| self.cache_metadata.read().last_key.clone());
 
@@ -332,10 +333,10 @@ mod tests {
         cache.insert(4, 4);
         tokio::time::sleep(Duration::from_nanos(1)).await;
 
-        assert_eq!(cache.get(&1), Some(1));
-        assert_eq!(cache.get(&2), Some(2));
-        assert_eq!(cache.get(&3), Some(3));
-        assert_eq!(cache.get(&4), Some(4));
+        assert_eq!(cache.get(&1).as_deref().cloned(), Some(1));
+        assert_eq!(cache.get(&2).as_deref().cloned(), Some(2));
+        assert_eq!(cache.get(&3).as_deref().cloned(), Some(3));
+        assert_eq!(cache.get(&4).as_deref().cloned(), Some(4));
     }
 
     #[tokio::test]
@@ -348,12 +349,12 @@ mod tests {
         for i in 0..8 {
             cache.insert(i, i);
             tokio::time::sleep(Duration::from_nanos(1)).await;
-            assert_eq!(cache.total_size(), (i + 1) * 8);
+            assert_eq!(cache.total_size(), ((i + 1) * 8) as usize);
             tokio::time::sleep(Duration::from_nanos(1)).await;
         }
 
         for i in 0..8 {
-            assert_eq!(cache.get(&i), Some(i));
+            assert_eq!(cache.get(&i).as_deref().cloned(), Some(i));
         }
 
         // Insert 9th value, size is 8*9=72>64 bytes, eviction threshold reached
@@ -365,16 +366,16 @@ mod tests {
         // New size is 8*5=40 bytes
         // Keys evicted: 0, 1, 2, 3
         assert_eq!(cache.total_size(), 40);
-        assert_eq!(cache.get(&0), None);
-        assert_eq!(cache.get(&1), None);
-        assert_eq!(cache.get(&2), None);
-        assert_eq!(cache.get(&3), None);
+        assert_eq!(cache.get(&0).as_deref().cloned(), None);
+        assert_eq!(cache.get(&1).as_deref().cloned(), None);
+        assert_eq!(cache.get(&2).as_deref().cloned(), None);
+        assert_eq!(cache.get(&3).as_deref().cloned(), None);
 
         // Insert 10th value, size is 8*6=48 bytes
         cache.insert(9, 9);
         tokio::time::sleep(Duration::from_nanos(1)).await;
         assert_eq!(cache.total_size(), 48);
-        assert_eq!(cache.get(&9), Some(9));
+        assert_eq!(cache.get(&9).as_deref().cloned(), Some(9));
     }
 
     #[tokio::test]
@@ -392,7 +393,7 @@ mod tests {
         let mut stream = cache.get_stream(Some(0));
         tokio::time::sleep(Duration::from_nanos(1)).await;
         for i in 0..8 {
-            assert_eq!(stream.next().await.unwrap(), i);
+            assert_eq!(stream.next().await.unwrap(), Arc::new(i));
             tokio::time::sleep(Duration::from_nanos(1)).await;
         }
 
@@ -418,7 +419,7 @@ mod tests {
         let cache_clone = cache.clone();
         tokio::spawn(async move {
             let mut stream = cache_clone.get_stream(None);
-            assert_eq!(stream.next().await.unwrap(), 0);
+            assert_eq!(stream.next().await.as_deref().cloned(), Some(0));
         });
 
         cache.insert(0, 0);
