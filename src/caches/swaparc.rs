@@ -1,26 +1,26 @@
 use crate::{SizedCache, SizedCacheEntry};
-use arc_swap::ArcSwapOption;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
 };
+use swap_arc::SwapArcOption;
 
 const MAX_NUM_CACHE_ITEMS: usize = 1_000_000;
 
-pub struct ArcSwapCache<T: Send + Sync + Clone + 'static> {
-    cache: Box<[ArcSwapOption<SizedCacheEntry<T>>]>,
+pub struct SwapArcCache<T: Send + Sync + Clone + 'static> {
+    cache: Box<[SwapArcOption<SizedCacheEntry<T>>]>,
     capacity: usize,
     size: AtomicUsize,
 }
 
-impl<T> ArcSwapCache<T>
+impl<T> SwapArcCache<T>
 where
     T: Send + Sync + Clone + 'static,
 {
     pub fn with_capacity(capacity: usize) -> Self {
         let mut buffer = Vec::with_capacity(capacity);
         for _ in 0..capacity {
-            buffer.push(ArcSwapOption::new(None));
+            buffer.push(SwapArcOption::new(None));
         }
 
         Self {
@@ -31,7 +31,7 @@ where
     }
 }
 
-impl<T> Default for ArcSwapCache<T>
+impl<T> Default for SwapArcCache<T>
 where
     T: Send + Sync + Clone + 'static,
 {
@@ -40,7 +40,7 @@ where
     }
 }
 
-impl<T> SizedCache<T> for ArcSwapCache<T>
+impl<T> SizedCache<T> for SwapArcCache<T>
 where
     T: Send + Sync + Clone + 'static,
 {

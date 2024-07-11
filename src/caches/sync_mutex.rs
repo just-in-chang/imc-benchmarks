@@ -7,8 +7,9 @@ use std::sync::{
 
 type CacheEntry<T> = Arc<Mutex<Option<SizedCacheEntry<T>>>>;
 
-const MAX_NUM_CACHE_ITEMS: usize = 1_000_000;
+const DEFAULT_MAX_NUM_CACHE_ITEMS: usize = 1_000_000;
 
+/// A cache that uses a mutex to synchronize access to the cache entries.
 pub struct SyncMutexCache<T: Send + Sync + Clone> {
     cache: Box<[CacheEntry<T>]>,
     capacity: usize,
@@ -38,7 +39,7 @@ where
     T: Send + Sync + Clone,
 {
     fn default() -> Self {
-        Self::with_capacity(MAX_NUM_CACHE_ITEMS)
+        Self::with_capacity(DEFAULT_MAX_NUM_CACHE_ITEMS)
     }
 }
 
@@ -53,7 +54,6 @@ where
     }
 
     fn insert_with_size(&self, key: usize, value: Arc<T>, size_in_bytes: usize) -> usize {
-        // Get lock for cache entry
         let index = key % self.capacity;
         let arc = self.cache[index].clone();
         let mut lock = arc.lock();
@@ -76,11 +76,10 @@ where
     }
 
     fn evict(&self, key: &usize) -> Option<SizedCacheEntry<T>> {
-        // Get lock for cache entry
         let arc = self.cache[*key % self.capacity].clone();
         let mut lock = arc.lock();
 
-        // Update cache size & set previous value to none
+        // Update cache size & set value at key to none
         if let Some(prev_value) = lock.take() {
             self.size
                 .fetch_sub(prev_value.size_in_bytes, Ordering::Relaxed);

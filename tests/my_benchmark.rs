@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use aptos_in_memory_cache::{
     caches::{
-        async_mutex::AsyncMutexCache, sync_mutex::SyncMutexCache, sync_rwlock::SyncRwLockCache,
+        aarc::AarcCache, arcswap::ArcSwapCache, async_mutex::AsyncMutexCache, swaparc::SwapArcCache, sync_mutex::SyncMutexCache, sync_rwlock::SyncRwLockCache
     },
     AsyncCache, Cache,
 };
@@ -13,33 +13,59 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use tokio::{runtime::Runtime, task::JoinSet};
 
 async fn bench_sync_cache() {
-    let ca = SyncMutexCache::with_capacity(1_000_000);
+    let ca = SwapArcCache::with_capacity(1_000_000);
     // let ca = SyncRwLockCache::with_capacity(1_000_000);
     let cache = Arc::new(TestCache::with_capacity(ca, 1_100_000, 1_000_000));
     // let cache = Arc::new(FIFOCache::new(1_000_000, 1_100_000, |key, _| Some(key + 1)));
 
-    let mut join_set = JoinSet::new();
-    let num = 5_000_000;
+    // let mut join_set = JoinSet::new();
+    // let num = 5_000_000;
 
-    for _ in 0..1 {
-        let c = cache.clone();
-        join_set.spawn(async move {
-            for i in 0..num {
-                c.insert(i, NotATransaction::new(i as i64));
+    // for _ in 0..1 {
+    //     let c = cache.clone();
+    //     join_set.spawn(async move {
+    //         for i in 0..num {
+    //             c.insert(i, NotATransaction::new(i as i64));
+    //         }
+    //     });
+    // }
+
+    // for _ in 0..100 {
+    //     let c = cache.clone();
+    //     join_set.spawn(async move {
+    //         for i in 0..num {
+    //             c.get(&i);
+    //         }
+    //     });
+    // }
+
+    // join_set.join_next().await;
+
+    let c1 = cache.clone();
+    let t1 = tokio::spawn(async move {
+        for i in 0..1_000_000 {
+            c1.insert(i, NotATransaction::new(i as i64));
+        }
+
+        for i in 0..1_000_000 {
+            c1.get(&i);
+        }
+    });
+
+    let c2 = cache.clone();
+    let t2 = tokio::spawn(async move {
+        loop {
+            for i in 0..1_000_000 {
+                c2.get(&i);
             }
-        });
-    }
+            tokio::time::sleep(tokio::time::Duration::from_micros(1)).await;
+        }
+    });
 
-    for _ in 0..100 {
-        let c = cache.clone();
-        join_set.spawn(async move {
-            for i in 0..num {
-                c.get(&i);
-            }
-        });
+    tokio::select! {
+        t1u = t1 => t1u.unwrap(),
+        t2u = t2 => t2u.unwrap(),
     }
-
-    join_set.join_next().await;
 }
 
 async fn bench_async_cache() {

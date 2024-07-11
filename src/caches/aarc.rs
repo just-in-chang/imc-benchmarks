@@ -1,5 +1,5 @@
 use crate::{SizedCache, SizedCacheEntry};
-use arc_swap::ArcSwapOption;
+use aarc::{AtomicArc, Snapshot};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
@@ -7,20 +7,20 @@ use std::sync::{
 
 const MAX_NUM_CACHE_ITEMS: usize = 1_000_000;
 
-pub struct ArcSwapCache<T: Send + Sync + Clone + 'static> {
-    cache: Box<[ArcSwapOption<SizedCacheEntry<T>>]>,
+pub struct AarcCache<T: Send + Sync + Clone + 'static> {
+    cache: Box<[AtomicArc<Option<SizedCacheEntry<T>>>]>,
     capacity: usize,
     size: AtomicUsize,
 }
 
-impl<T> ArcSwapCache<T>
+impl<T> AarcCache<T>
 where
     T: Send + Sync + Clone + 'static,
 {
     pub fn with_capacity(capacity: usize) -> Self {
         let mut buffer = Vec::with_capacity(capacity);
         for _ in 0..capacity {
-            buffer.push(ArcSwapOption::new(None));
+            buffer.push(AtomicArc::new(None));
         }
 
         Self {
@@ -31,7 +31,7 @@ where
     }
 }
 
-impl<T> Default for ArcSwapCache<T>
+impl<T> Default for AarcCache<T>
 where
     T: Send + Sync + Clone + 'static,
 {
@@ -40,19 +40,21 @@ where
     }
 }
 
-impl<T> SizedCache<T> for ArcSwapCache<T>
+impl<T> SizedCache<T> for AarcCache<T>
 where
     T: Send + Sync + Clone + 'static,
 {
     fn get(&self, key: &usize) -> Option<SizedCacheEntry<T>> {
-        self.cache[*key % self.capacity].load().as_deref().cloned()
+        self.cache[*key % self.capacity]
+            .load::<Snapshot<_>>()
+            .and_then(|v| v.clone())
     }
 
     fn insert_with_size(&self, key: usize, value: Arc<T>, size_in_bytes: usize) -> usize {
         // Get lock for cache entry
         let index = key % self.capacity;
         let arc_swap = &self.cache[index];
-        let arc = arc_swap.load().as_deref().and_then(|v| Some(v.clone()));
+        let arc = arc_swap.load::<Snapshot<_>>().and_then(|v| v.clone());
 
         // Update cache size
         if let Some(prev_value) = arc {
@@ -63,16 +65,11 @@ where
         // Update cache entry
         self.size.fetch_add(size_in_bytes, Ordering::Relaxed);
 
-        // arc_swap.store(Some(&Arc::new(Some(SizedCacheEntry {
-        //     key,
-        //     value,
-        //     size_in_bytes,
-        // }))));
-        arc_swap.store(Some(Arc::new(SizedCacheEntry {
+        arc_swap.store(Some(&Arc::new(Some(SizedCacheEntry {
             key,
             value,
             size_in_bytes,
-        })));
+        }))));
 
         index
     }
@@ -82,11 +79,11 @@ where
         let arc_swap = &self.cache[*key % self.capacity];
 
         // Update cache size & set previous value to none
-        let arc = arc_swap.load().as_deref().and_then(|v| Some(v.clone()));
+        let arc = arc_swap.load::<Snapshot<_>>().and_then(|v| v.clone());
         if let Some(prev_value) = arc {
             self.size
                 .fetch_sub(prev_value.size_in_bytes, Ordering::Relaxed);
-            arc_swap.store(None);
+            arc_swap.store(Some(&Arc::new(None)));
             return Some(prev_value);
         }
         None

@@ -6,7 +6,7 @@ use std::{hash::Hash, sync::Arc};
 
 pub mod caches;
 
-/// A struct that holds a value and its size in bytes.
+/// A struct that holds a single cache entry, containing its key, value, and size in bytes.
 #[derive(Clone, Debug)]
 pub struct SizedCacheEntry<V> {
     pub key: usize,

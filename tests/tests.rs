@@ -8,38 +8,38 @@ pub mod common;
 
 #[cfg(test)]
 mod tests {
-    use aptos_in_memory_cache::caches::arcswap::ArcSwapCache;
+    use aptos_in_memory_cache::caches::arcswap::AarcCache;
 
     use super::*;
     // use aptos_in_memory_cache::caches::sync_mutex::ArcSwapCache;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
     async fn test_insert_out_of_order() {
-        let cache = ArcSwapCache::with_capacity(10);
+        let cache = AarcCache::with_capacity(10);
         test_insert_out_of_order_impl(cache).await;
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
     async fn test_array_wrap_around() {
-        let cache = ArcSwapCache::with_capacity(10);
+        let cache = AarcCache::with_capacity(10);
         test_array_wrap_around_impl(cache);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
     async fn test_eviction_on_size_limit() {
-        let cache = ArcSwapCache::with_capacity(10);
+        let cache = AarcCache::with_capacity(10);
         test_eviction_on_size_limit_impl(cache).await;
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
     async fn test_eviction_out_of_order_inserts() {
-        let cache = ArcSwapCache::with_capacity(20);
+        let cache = AarcCache::with_capacity(20);
         test_eviction_out_of_order_inserts_impl(cache).await;
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
     async fn test_eviction_with_array_wrap_around() {
-        let cache = ArcSwapCache::with_capacity(10);
+        let cache = AarcCache::with_capacity(10);
         test_eviction_with_array_wrap_around_impl(cache).await;
     }
 }

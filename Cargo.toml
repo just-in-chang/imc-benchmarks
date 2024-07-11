@@ -5,7 +5,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-arc-swap = "1.6.0"
+arc-swap = "1.7.1"
 swap-arc = "0.1.1"
 aarc = "0.2.1"
 async-trait = "0.1.53"
