@@ -1,6 +1,6 @@
 use get_size::GetSize;
 
-pub mod async_cache;
+// pub mod async_cache;
 pub mod sync_cache;
 
 #[derive(Clone, GetSize, Debug, PartialEq)]

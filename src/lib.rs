@@ -2,31 +2,45 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use futures::Stream;
-use std::{hash::Hash, sync::Arc};
+use parking_lot::Mutex;
+use std::{
+    hash::Hash,
+    sync::{
+        atomic::{AtomicPtr, AtomicUsize},
+        Arc,
+    },
+};
 
 pub mod caches;
 
 /// A struct that holds a single cache entry, containing its key, value, and size in bytes.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct SizedCacheEntry<V> {
-    pub key: usize,
-    pub value: Arc<V>,
-    pub size_in_bytes: usize,
+    pub key: AtomicUsize,
+    pub value: AtomicPtr<V>,
+    pub size_in_bytes: AtomicUsize,
+}
+
+impl<V> SizedCacheEntry<V> {
+    fn new() -> Self {
+        Self {
+            key: AtomicUsize::new(0),
+            value: AtomicPtr::new(std::ptr::null_mut()),
+            size_in_bytes: AtomicUsize::new(0),
+        }
+    }
 }
 
 /// A trait for a cache that can be used to store key-value pairs.
-pub trait SizedCache<V>: Send + Sync
-where
-    V: Send + Sync,
-{
+pub trait SizedCache<V>: Send + Sync {
     /// Get the value for a given key. Return [`None`] if the key is not in the cache.
-    fn get(&self, key: &usize) -> Option<SizedCacheEntry<V>>;
+    fn get(&self, key: &usize) -> Option<(usize, &V)>;
 
     /// Inserts a given key-value pair in cache. Returns the index of the inserted entry. Panics if the insert fails.
-    fn insert_with_size(&self, key: usize, value: Arc<V>, size_in_bytes: usize) -> usize;
+    fn insert_with_size(&self, key: usize, value: V, size_in_bytes: usize) -> usize;
 
     /// Evicts the value for a given key from the cache.
-    fn evict(&self, key: &usize) -> Option<SizedCacheEntry<V>>;
+    fn evict(&self, key: &usize) -> Option<(usize, V)>;
 
     /// Returns the total size of the cache.
     fn total_size(&self) -> usize;
@@ -42,7 +56,7 @@ where
     V: Clone + Send + Sync,
 {
     /// Get the value for a given key. Return [`None`] if the key is not in the cache.
-    fn get(&self, key: &K) -> Option<Arc<V>>;
+    fn get(&self, key: &K) -> Option<&V>;
 
     /// Inserts a given key-value pair in cache. Panics if the insert fails.
     fn insert(&self, key: K, value: V);
