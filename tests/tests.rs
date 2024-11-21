@@ -8,7 +8,7 @@ pub mod common;
 
 #[cfg(test)]
 mod tests {
-    use aptos_in_memory_cache::caches::arcswap::AarcCache;
+    use aptos_in_memory_cache::caches::aarc::AarcCache;
 
     use super::*;
     // use aptos_in_memory_cache::caches::sync_mutex::ArcSwapCache;
