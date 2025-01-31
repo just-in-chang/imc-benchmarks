@@ -1,16 +1,19 @@
-use aptos_in_memory_cache::caches::aarc::AarcCache;
-use aptos_in_memory_cache::caches::arcswap::ArcSwapCache;
-use aptos_in_memory_cache::caches::fifo::FIFOCache;
+// use aptos_in_memory_cache::caches::aarc::AarcCache;
+// use aptos_in_memory_cache::caches::arcswap::ArcSwapCache;
+// use aptos_in_memory_cache::caches::fifo::FIFOCache;
 use aptos_in_memory_cache::caches::sync_mutex::SyncMutexCache;
 // use aptos_in_memory_cache::caches::sync_mutex::SyncMutexCache;
 // use aptos_in_memory_cache::caches::sync_rwlock::SyncRwLockCache;
 use aptos_in_memory_cache::{Cache, SizedCache};
-use arc_swap::ArcSwap;
+// use arc_swap::ArcSwap;
 use get_size::GetSize;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::sync::Notify;
-use tokio::task::{JoinHandle, JoinSet};
+use tokio::task::{
+    JoinHandle,
+    //  JoinSet
+};
 
 #[derive(Clone, GetSize, Debug, PartialEq)]
 pub struct NotATransaction {
@@ -81,7 +84,7 @@ impl<C: SizedCache<NotATransaction> + 'static> TestCache<C> {
 }
 
 impl<C: SizedCache<NotATransaction> + 'static> Cache<usize, NotATransaction> for TestCache<C> {
-    fn get(&self, key: &usize) -> Option<Arc<NotATransaction>> {
+    fn get(&self, key: &usize) -> Option<NotATransaction> {
         self.cache.get(key).and_then(|entry| {
             if entry.key == *key {
                 return Some(entry.value.clone());
@@ -92,8 +95,7 @@ impl<C: SizedCache<NotATransaction> + 'static> Cache<usize, NotATransaction> for
 
     fn insert(&self, key: usize, value: NotATransaction) {
         let size_in_bytes = value.get_size();
-        self.cache
-            .insert_with_size(key, Arc::new(value), size_in_bytes);
+        self.cache.insert_with_size(key, value, size_in_bytes);
         if self.cache.total_size() > self.metadata.eviction_trigger_size_in_bytes {
             self.eviction_start.store(key, Ordering::Relaxed);
             self.insert_notify.notify_one();
@@ -134,7 +136,7 @@ fn spawn_eviction_task<C: SizedCache<NotATransaction> + 'static>(
 
 #[tokio::main]
 async fn main() {
-    let ca = AarcCache::with_capacity(1_000_000);
+    let ca = SyncMutexCache::with_capacity(1_000_000);
     // let ca = SyncRwLockCache::with_capacity(1_000_000);
     let cache = Arc::new(TestCache::with_capacity(ca, 1_100_000, 1_000_000));
     // let cache = Arc::new(FIFOCache::new(1_000_000, 1_100_000, |key, _| Some(key + 1)));

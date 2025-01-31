@@ -53,7 +53,7 @@ where
         lock.clone()
     }
 
-    fn insert_with_size(&self, key: usize, value: Arc<T>, size_in_bytes: usize) -> usize {
+    fn insert_with_size(&self, key: usize, value: T, size_in_bytes: usize) -> usize {
         let index = key % self.capacity;
         let arc = self.cache[index].clone();
         let mut lock = arc.lock();

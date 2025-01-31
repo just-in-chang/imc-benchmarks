@@ -55,7 +55,7 @@ impl<C: SizedCache<NotATransaction> + 'static> TestCache<C> {
 }
 
 impl<C: SizedCache<NotATransaction> + 'static> Cache<usize, NotATransaction> for TestCache<C> {
-    fn get(&self, key: &usize) -> Option<Arc<NotATransaction>> {
+    fn get(&self, key: &usize) -> Option<NotATransaction> {
         self.cache.get(key).and_then(|entry| {
             if entry.key == *key {
                 return Some(entry.value.clone());
@@ -66,8 +66,7 @@ impl<C: SizedCache<NotATransaction> + 'static> Cache<usize, NotATransaction> for
 
     fn insert(&self, key: usize, value: NotATransaction) {
         let size_in_bytes = value.get_size();
-        self.cache
-            .insert_with_size(key, Arc::new(value), size_in_bytes);
+        self.cache.insert_with_size(key, value, size_in_bytes);
         if self.cache.total_size() > self.metadata.eviction_trigger_size_in_bytes {
             self.eviction_start.store(key, Ordering::Relaxed);
             self.insert_notify.notify_one();
