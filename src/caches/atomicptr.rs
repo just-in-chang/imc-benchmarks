@@ -61,7 +61,13 @@ where
 {
     fn get(&self, key: &usize) -> Option<SizedCacheEntry<T>> {
         let ptr = self.cache[*key % self.capacity].load(Ordering::Acquire);
-        unsafe { (!ptr.is_null()).then(|| (*ptr).clone()) }
+        unsafe {
+            if !ptr.is_null() {
+                Some((*ptr).clone())
+            } else {
+                None
+            }
+        }
     }
 
     fn insert_with_size(&self, key: usize, value: T, size_in_bytes: usize) -> usize {
@@ -74,7 +80,7 @@ where
 
         let old_ptr = self.cache[index].swap(Box::into_raw(Box::new(entry)), Ordering::AcqRel);
 
-        // Clean up old entry and update size
+        // Update cache size and drop old entry
         unsafe {
             if !old_ptr.is_null() {
                 self.size
